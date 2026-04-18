@@ -5,6 +5,7 @@ target/
 
 .env
 application-local.properties
+!application-local.properties.example
 
 .idea/
 *.iml

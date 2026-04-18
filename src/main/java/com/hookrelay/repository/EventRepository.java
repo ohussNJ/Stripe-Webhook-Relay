@@ -50,6 +50,14 @@ public class EventRepository {
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
+    public List<Event> findRecent(int limit) {
+        return jdbc.query(
+                "SELECT * FROM events ORDER BY received_at DESC LIMIT ?",
+                EVENT_ROW_MAPPER,
+                limit
+        );
+    }
+
     private static final RowMapper<Event> EVENT_ROW_MAPPER = (rs, rowNum) -> new Event(
             rs.getLong("id"),
             rs.getString("stripe_event_id"),

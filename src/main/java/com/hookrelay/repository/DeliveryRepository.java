@@ -104,6 +104,13 @@ public class DeliveryRepository {
         );
     }
 
+    // On startup any in_progress rows from a previous crashed instance are reset so they get retried
+    public int resetInProgressToPending() {
+        return jdbc.update(
+                "UPDATE deliveries SET status = 'pending', next_retry_at = now() WHERE status = 'in_progress'"
+        );
+    }
+
     public int resetAllToPending(long eventId) {
         return jdbc.update(
                 "UPDATE deliveries SET status = 'pending', next_retry_at = now() WHERE event_id = ? AND status = 'dead_lettered'",
