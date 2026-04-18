@@ -8,7 +8,7 @@ ADMIN_KEY="${ADMIN_KEY:-local-admin-key}"
 
 echo "Registering demo endpoints against $BASE_URL"
 
-curl -s -X POST "$BASE_URL/admin/endpoints" \
+curl.exe -s -X POST "$BASE_URL/admin/endpoints" \
   -H "Content-Type: application/json" \
   -H "X-Admin-Key: $ADMIN_KEY" \
   -d "{\"url\":\"$BASE_URL/chaos/order-service?failure_rate=0.3\",\"eventTypes\":[\"payment_intent.succeeded\",\"charge.refunded\"]}" \
@@ -16,7 +16,7 @@ curl -s -X POST "$BASE_URL/admin/endpoints" \
 
 echo ""
 
-curl -s -X POST "$BASE_URL/admin/endpoints" \
+curl.exe -s -X POST "$BASE_URL/admin/endpoints" \
   -H "Content-Type: application/json" \
   -H "X-Admin-Key: $ADMIN_KEY" \
   -d "{\"url\":\"$BASE_URL/chaos/email-service?failure_rate=0.5\",\"eventTypes\":[\"payment_intent.succeeded\",\"payment_intent.payment_failed\"]}" \
@@ -24,11 +24,11 @@ curl -s -X POST "$BASE_URL/admin/endpoints" \
 
 echo ""
 
-curl -s -X POST "$BASE_URL/admin/endpoints" \
+curl.exe -s -X POST "$BASE_URL/admin/endpoints" \
   -H "Content-Type: application/json" \
   -H "X-Admin-Key: $ADMIN_KEY" \
   -d "{\"url\":\"$BASE_URL/chaos/analytics?failure_rate=0.1\",\"eventTypes\":[]}" \
   | cat
 
 echo ""
-echo "Done. Run: curl -H \"X-Admin-Key: $ADMIN_KEY\" $BASE_URL/admin/endpoints to verify."
+echo "Done. Run: curl.exe -H \"X-Admin-Key: $ADMIN_KEY\" $BASE_URL/admin/endpoints to verify."

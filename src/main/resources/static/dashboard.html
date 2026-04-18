@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stripe Webhook Relay</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue-dark:  #1a4a8a;
+      --blue-mid:   #2a6cc8;
+      --blue-light: #4a90e0;
+      --bg:         #1e2635;
+      --surface:    #252d3d;
+      --border:     #2e3a50;
+      --text:       #d0dce8;
+      --muted:      #7a90a8;
+      --subtle:     #506070;
+      --green:      #4caf80;
+      --green-bg:   #1a3028;
+      --green-bd:   #2a6040;
+      --yellow:     #d4a030;
+      --yellow-bg:  #2e2510;
+      --yellow-bd:  #6a4a10;
+      --red:        #e06060;
+      --red-bg:     #301818;
+      --red-bd:     #6a2828;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    /* ── Header ── */
+    header {
+      height: 52px;
+      background: linear-gradient(135deg, var(--blue-dark) 0%, var(--blue-mid) 60%, var(--blue-light) 100%);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.3);
+      flex-shrink: 0;
+    }
+    .brand {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: -.2px;
+      text-shadow: 0 1px 2px rgba(0,0,0,.3);
+      white-space: nowrap;
+    }
+    .header-sep { width: 1px; height: 24px; background: rgba(255,255,255,.25); }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    #last-updated { font-size: 11px; color: rgba(255,255,255,.55); }
+    .refresh-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.3);
+      border-radius: 5px;
+      color: #fff;
+      font-size: 12px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .refresh-btn:hover { background: rgba(255,255,255,.25); }
+    .refresh-btn.loading { opacity: .5; pointer-events: none; }
+
+    /* ── Layout ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      height: calc(100vh - 52px);
+    }
+
+    /* ── Sidebar ── */
+    aside {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-block { display: flex; flex-direction: column; overflow: hidden; }
+    .sidebar-block.events   { flex: 1 1 0; min-height: 0; }
+    .sidebar-block.endpoints { flex: 0 0 auto; max-height: 38vh; border-top: 1px solid var(--border); }
+    .sidebar-scroll { overflow-y: auto; flex: 1; }
+    .sidebar-heading {
+      padding: 8px 12px 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--subtle);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .event-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      gap: 6px;
+      transition: background .08s;
+    }
+    .event-item:hover { background: rgba(74,144,224,.12); }
+    .event-item.active {
+      background: rgba(74,144,224,.18);
+      border-left-color: var(--blue-light);
+    }
+    .event-item.active .etype { color: #7ab8f0; font-weight: 600; }
+    .etype  { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .etime  { font-size: 10px; color: var(--subtle); white-space: nowrap; flex-shrink: 0; }
+    .event-status { font-size: 11px; flex-shrink: 0; width: 14px; text-align: center; }
+    .event-status.ok     { color: var(--green); }
+    .event-status.failed { color: var(--red); }
+
+    .ep-item { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+    .ep-item:last-child { border-bottom: none; }
+    .ep-url  { font-size: 11px; color: var(--text); word-break: break-all; margin-bottom: 3px; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 3px; }
+    .tag {
+      font-size: 9px;
+      font-family: 'Consolas', monospace;
+      padding: 1px 5px;
+      background: rgba(74,144,224,.15);
+      border: 1px solid rgba(74,144,224,.3);
+      border-radius: 3px;
+      color: #7ab8f0;
+    }
+    .tag.wild { background: rgba(255,255,255,.05); color: var(--muted); border-color: var(--border); }
+
+    /* ── Right side ── */
+    .right { display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Stats ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .stat { padding: 12px 20px; border-right: 1px solid var(--border); }
+    .stat:last-child { border-right: none; }
+    .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+    .stat-val   { font-size: 24px; font-weight: 700; color: var(--text); line-height: 1; }
+    .stat-val.g { color: var(--green); }
+    .stat-val.y { color: var(--yellow); }
+    .stat-val.r { color: var(--red); }
+
+    /* ── Main panel ── */
+    main { flex: 1; overflow-y: auto; padding: 16px 20px; }
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--subtle);
+      font-size: 13px;
+    }
+
+    /* ── Panel header ── */
+    .panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .panel-header h2 { font-size: 14px; font-weight: 600; color: var(--text); }
+    .chip {
+      font-size: 10px;
+      font-family: 'Consolas', monospace;
+      padding: 2px 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--muted);
+    }
+    .panel-header .spacer { flex: 1; }
+    .action-btn {
+      padding: 4px 11px;
+      font-size: 11px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: background .1s, border-color .1s;
+      white-space: nowrap;
+    }
+    .action-btn:hover { background: rgba(74,144,224,.15); border-color: rgba(74,144,224,.4); }
+    .action-btn:disabled { opacity: .35; cursor: default; }
+
+    /* ── Table ── */
+    .tbl-wrap { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      padding: 7px 12px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    thead th:last-child { border-right: none; }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .08s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr.clickable { cursor: pointer; }
+    tbody tr.clickable:hover { background: rgba(74,144,224,.08); }
+    td { padding: 8px 12px; vertical-align: middle; }
+    td.mono { font-family: 'Consolas', monospace; font-size: 11px; color: var(--muted); }
+    td.dim  { color: var(--muted); font-size: 12px; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      border: 1px solid;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .badge.delivered     { background: var(--green-bg);  color: var(--green);  border-color: var(--green-bd);  }
+    .badge.pending       { background: rgba(74,144,224,.15); color: #7ab8f0; border-color: rgba(74,144,224,.35); }
+    .badge.in_progress   { background: var(--yellow-bg); color: var(--yellow); border-color: var(--yellow-bd); }
+    .badge.dead_lettered { background: var(--red-bg);    color: var(--red);    border-color: var(--red-bd);    }
+
+    /* ── Attempts sub-row ── */
+    .attempts-row td { padding: 0 0 8px 20px; }
+    .attempts-inner {
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--blue-mid);
+      border-radius: 0 0 4px 4px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+    .attempts-inner table thead th { background: var(--bg); }
+
+    /* ── Status bar ── */
+    .statusbar {
+      height: 24px;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .sb-item { font-size: 11px; color: var(--muted); }
+    .sb-sep  { width: 1px; height: 12px; background: var(--border); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 28px; right: 24px;
+      background: var(--text);
+      color: var(--bg);
+      padding: 8px 14px;
+      border-radius: 5px;
+      font-size: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.3);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity .15s, transform .15s;
+      pointer-events: none;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="brand">Stripe Webhook Relay</span>
+  <div class="header-sep"></div>
+  <div class="header-right">
+    <span id="last-updated"></span>
+    <button class="refresh-btn" id="refresh-btn" onclick="loadAll()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+        <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside>
+    <div class="sidebar-block events">
+      <div class="sidebar-heading">Events</div>
+      <div class="sidebar-scroll" id="event-list">
+        <div style="padding:10px 12px;color:#506070;font-size:11px">Loading…</div>
+      </div>
+    </div>
+    <div class="sidebar-block endpoints">
+      <div class="sidebar-heading">Endpoints</div>
+      <div class="sidebar-scroll" id="endpoint-list">
+        <div style="padding:10px 12px;color:#506070;font-size:11px">Loading…</div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="right">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Events received</div>
+        <div class="stat-val" id="stat-events">–</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Deliveries succeeded</div>
+        <div class="stat-val g" id="stat-delivered">–</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Pending</div>
+        <div class="stat-val y" id="stat-pending">–</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Dead-lettered</div>
+        <div class="stat-val r" id="stat-dead">–</div>
+      </div>
+    </div>
+
+    <main id="main-panel">
+      <div class="empty-state">Select an event from the left panel to view its deliveries.</div>
+    </main>
+
+    <div class="statusbar">
+      <span class="sb-item" id="sb-events">0 events</span>
+      <div class="sb-sep"></div>
+      <span class="sb-item" id="sb-endpoints">0 endpoints</span>
+      <div class="sb-sep"></div>
+      <span class="sb-item" id="sb-status">Ready</span>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let allEvents = [], allEndpoints = [], deliveryCache = {};
+  let selectedEventId = null, selectedDeliveryId = null;
+
+  const ADMIN_KEY = 'local-admin-key';
+  const hdrs = () => ({ 'X-Admin-Key': ADMIN_KEY });
+
+  async function api(path) {
+    const r = await fetch(path, { headers: hdrs() });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  }
+  async function apiPost(path) {
+    const r = await fetch(path, { method: 'POST', headers: hdrs() });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json().catch(() => ({}));
+  }
+
+  let toastTimer;
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  function relTime(iso) {
+    if (!iso) return '–';
+    const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.floor(s/60)}m ago`;
+    if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+  function absTime(iso) { return iso ? new Date(iso).toLocaleString() : '–'; }
+
+  async function loadAll() {
+    const btn = document.getElementById('refresh-btn');
+    btn.classList.add('loading');
+    document.getElementById('sb-status').textContent = 'Refreshing…';
+    try {
+      const [events, endpoints] = await Promise.all([
+        api('/admin/events?limit=50'),
+        api('/admin/endpoints'),
+      ]);
+      allEvents = events; allEndpoints = endpoints;
+      renderEventList(); renderEndpointList();
+
+      const results = await Promise.allSettled(
+        events.map(e => api(`/admin/events/${e.id}/deliveries`))
+      );
+      results.forEach((r, i) => { if (r.status === 'fulfilled') deliveryCache[events[i].id] = r.value; });
+
+      document.getElementById('stat-events').textContent = events.length || '0';
+      recalcStats();
+      renderEventList();
+      document.getElementById('sb-events').textContent    = `${events.length} event${events.length !== 1 ? 's' : ''}`;
+      document.getElementById('sb-endpoints').textContent = `${endpoints.length} endpoint${endpoints.length !== 1 ? 's' : ''}`;
+      document.getElementById('sb-status').textContent    = 'Updated ' + new Date().toLocaleTimeString();
+      if (selectedEventId) await loadDeliveries(selectedEventId, false);
+    } catch (e) {
+      document.getElementById('sb-status').textContent = 'Error: ' + e.message;
+      toast('Load failed: ' + e.message);
+    } finally {
+      btn.classList.remove('loading');
+    }
+  }
+
+  function recalcStats() {
+    let delivered = 0, pending = 0, dead = 0;
+    for (const ds of Object.values(deliveryCache))
+      for (const d of ds) {
+        const s = (d.status || '').toLowerCase();
+        if (s === 'delivered') delivered++;
+        else if (s === 'pending' || s === 'in_progress') pending++;
+        else if (s === 'dead_lettered') dead++;
+      }
+    document.getElementById('stat-delivered').textContent = delivered || '0';
+    document.getElementById('stat-pending').textContent   = pending   || '0';
+    document.getElementById('stat-dead').textContent      = dead      || '0';
+  }
+
+  function eventDotClass(eventId) {
+    const ds = deliveryCache[eventId];
+    if (!ds || !ds.length) return 'unknown';
+    const statuses = ds.map(d => (d.status || '').toLowerCase());
+    if (statuses.some(s => s === 'pending' || s === 'in_progress')) return 'pending';
+    if (statuses.some(s => s === 'dead_lettered')) return 'failed';
+    if (statuses.every(s => s === 'delivered')) return 'ok';
+    return 'unknown';
+  }
+
+  function renderEventList() {
+    const el = document.getElementById('event-list');
+    if (!allEvents.length) { el.innerHTML = '<div style="padding:10px 12px;color:#506070;font-size:11px">No events yet.</div>'; return; }
+    el.innerHTML = allEvents.map(e => `
+      <div class="event-item ${e.id === selectedEventId ? 'active' : ''}" onclick="selectEvent(${e.id})">
+        <span class="event-status ${eventDotClass(e.id)}">${{ok:'✓',failed:'✗',pending:'',unknown:''}[eventDotClass(e.id)]}</span>
+        <span class="etype">${esc(e.type)}</span>
+        <span class="etime">${relTime(e.receivedAt)}</span>
+      </div>`).join('');
+  }
+
+  function renderEndpointList() {
+    const el = document.getElementById('endpoint-list');
+    if (!allEndpoints.length) { el.innerHTML = '<div style="padding:10px 12px;color:#506070;font-size:11px">None registered.</div>'; return; }
+    el.innerHTML = allEndpoints.map(ep => {
+      const tags = ep.eventTypes?.length
+        ? ep.eventTypes.map(t => `<span class="tag">${esc(t)}</span>`).join('')
+        : '<span class="tag wild">all events</span>';
+      return `<div class="ep-item"><div class="ep-url">${esc(ep.url)}</div><div class="tag-row">${tags}</div></div>`;
+    }).join('');
+  }
+
+  async function selectEvent(id) {
+    selectedEventId = id; selectedDeliveryId = null;
+    renderEventList();
+    await loadDeliveries(id, true);
+  }
+
+  async function loadDeliveries(eventId, showLoading) {
+    const panel = document.getElementById('main-panel');
+    if (showLoading) panel.innerHTML = '<div class="empty-state">Loading…</div>';
+    try {
+      const deliveries = await api(`/admin/events/${eventId}/deliveries`);
+      deliveryCache[eventId] = deliveries; recalcStats();
+      renderDeliveryPanel(allEvents.find(e => e.id === eventId), deliveries);
+    } catch (e) {
+      panel.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function renderDeliveryPanel(event, deliveries) {
+    const panel = document.getElementById('main-panel');
+    const epMap = Object.fromEntries(allEndpoints.map(ep => [ep.id, ep]));
+    const hasDL = deliveries.some(d => d.status === 'DEAD_LETTERED');
+
+    const rows = deliveries.map(d => {
+      const ep  = epMap[d.endpointId];
+      const url = ep ? esc(ep.url) : `endpoint #${d.endpointId}`;
+      const st  = (d.status || '').toLowerCase();
+      return `
+        <tr class="clickable" onclick="toggleAttempts(${d.id})">
+          <td class="mono">#${d.id}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${url}</td>
+          <td><span class="badge ${st}">${esc(d.status)}</span></td>
+          <td class="dim">${d.attempts}</td>
+          <td class="dim">${relTime(d.lastAttemptedAt)}</td>
+          <td class="dim">${st === 'pending' || st === 'in_progress' ? relTime(d.nextRetryAt) : '–'}</td>
+          <td onclick="event.stopPropagation()">
+            <button class="action-btn" ${st !== 'dead_lettered' ? 'disabled' : ''} onclick="replayDelivery(${d.id})">Replay</button>
+          </td>
+        </tr>
+        <tr class="attempts-row" id="attempts-row-${d.id}" style="display:none">
+          <td colspan="7"><div class="attempts-inner" id="attempts-${d.id}"><div style="padding:8px 12px;color:#506070;font-size:11px">Loading…</div></div></td>
+        </tr>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <div class="panel-header">
+        <h2>${event ? esc(event.type) : 'Event #' + selectedEventId}</h2>
+        ${event ? `<span class="chip">${esc(event.stripeEventId)}</span>` : ''}
+        <span class="chip">${deliveries.length} deliveries</span>
+        <div class="spacer"></div>
+        ${hasDL ? `<button class="action-btn" onclick="replayEvent(${selectedEventId})">Replay all dead-lettered</button>` : ''}
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Endpoint</th><th>Status</th><th>Attempts</th><th>Last attempt</th><th>Next retry</th><th></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" style="padding:20px;text-align:center;color:#506070">No deliveries.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+
+    if (selectedDeliveryId) showAttempts(selectedDeliveryId);
+  }
+
+  async function toggleAttempts(id) {
+    const row = document.getElementById(`attempts-row-${id}`);
+    if (!row) return;
+    if (row.style.display !== 'none') { row.style.display = 'none'; selectedDeliveryId = null; }
+    else { row.style.display = ''; selectedDeliveryId = id; await showAttempts(id); }
+  }
+
+  async function showAttempts(id) {
+    const el = document.getElementById(`attempts-${id}`);
+    if (!el) return;
+    try {
+      const attempts = await api(`/admin/deliveries/${id}/attempts`);
+      if (!attempts.length) { el.innerHTML = '<div style="padding:8px 12px;color:#506070;font-size:11px">No attempts recorded yet.</div>'; return; }
+      const rows = attempts.map(a => `
+        <tr>
+          <td class="dim">${absTime(a.attemptedAt)}</td>
+          <td>${a.httpStatus != null ? `<code style="font-family:Consolas,monospace;font-size:11px">${a.httpStatus}</code>` : '–'}</td>
+          <td class="dim">${a.latencyMs != null ? a.latencyMs + ' ms' : '–'}</td>
+          <td><span class="badge ${outcomeClass(a.outcome)}">${esc(a.outcome)}</span></td>
+        </tr>`).join('');
+      el.innerHTML = `<table><thead><tr><th>Time</th><th>HTTP</th><th>Latency</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table>`;
+    } catch (e) {
+      el.innerHTML = `<div style="padding:8px 12px;color:var(--red);font-size:11px">Error: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function outcomeClass(o) {
+    if (!o) return '';
+    const v = o.toLowerCase();
+    if (v === 'success') return 'delivered';
+    if (v.includes('timeout') || v.includes('network') || v.includes('connection')) return 'in_progress';
+    return 'dead_lettered';
+  }
+
+  async function replayDelivery(id) {
+    try { await apiPost(`/admin/deliveries/${id}/replay`); toast(`Delivery #${id} queued for replay`); await loadDeliveries(selectedEventId, false); }
+    catch (e) { toast('Replay failed: ' + e.message); }
+  }
+
+  async function replayEvent(eventId) {
+    try { const r = await apiPost(`/admin/events/${eventId}/replay`); toast(`${r.queued ?? '?'} deliveries queued for replay`); await loadDeliveries(eventId, false); }
+    catch (e) { toast('Replay failed: ' + e.message); }
+  }
+
+  function esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  loadAll();
+  setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
