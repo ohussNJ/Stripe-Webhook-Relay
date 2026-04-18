@@ -1,0 +1,10 @@
+# Local development overrides
+# Copy this pattern to set env vars, or override here for local testing
+
+spring.datasource.url=jdbc:postgresql://localhost:5433/hookrelay
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+
+hookrelay.stripe.webhook-secret={whsec_placeholder}
+
+hookrelay.worker.thread-count=2
