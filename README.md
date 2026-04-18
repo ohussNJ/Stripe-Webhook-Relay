@@ -2,28 +2,32 @@
 
 Receives a single inbound Stripe event and fans it out to multiple registered downstream services. Includes per-endpoint event-type filtering, exponential backoff retry, dead-letter handling, and manual replay.
 
-## Contents
+---
 
-- [Tech Stack](#tech-stack)
+## Stack
+
+| Component | Role |
+|-----------|------|
+| **Java 21 + Spring Boot 3.2** | REST API, background delivery workers, virtual threads |
+| **PostgreSQL** | Stores events, delivery state, and retry history |
+| **Flyway** | Database migrations |
+| **Stripe Java SDK** | Webhook signature verification |
+| **Micrometer + Prometheus** | Delivery counters and latency metrics via `/actuator/prometheus` |
+| **Docker** | Containerises the app for deployment |
+
+---
+
+## Table of Contents
+
 - [Motivation](#motivation)
 - [Architecture](#architecture)
 - [Key Design Decisions](#key-design-decisions)
 - [API Reference](#api-reference)
-- [Running Locally](#running-locally)
+- [Setup](#setup)
 - [Configuration](#configuration)
 - [Production Considerations](#production-considerations)
 - [Dashboard](#dashboard)
 - [Demo](#demo)
-
----
-
-## Tech Stack
-
-- Java 21, Spring Boot 3.2
-- PostgreSQL, Flyway
-- Micrometer, Prometheus
-- Stripe Java SDK
-- Docker
 
 ---
 
@@ -166,11 +170,11 @@ Returns 500 at `failure_rate` probability and injects a 5-second delay at `laten
 
 ---
 
-## Running Locally
+## Setup
 
 ### Prerequisites
 
-- Docker Desktop
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - Java 21
 - [Stripe CLI](https://stripe.com/docs/stripe-cli)
 
